@@ -1,25 +1,26 @@
 // app/api/speak/route.ts
 //
-// MOUTH — Text-to-Speech via OpenAI TTS.
+// MOUTH — Text-to-Speech via Gemini TTS.
 // Takes the Brain's completed response text and returns one audio clip.
 // Only called once the full response text is ready — never mid-stream.
 
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
+import {
+  getGemini,
+  GEMINI_TTS_MODEL,
+  GEMINI_TTS_VOICE,
+} from "@/lib/gemini";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
+const MAX_SPEECH_CHARS = 4000;
+
+// Gemini TTS reads `text` verbatim, so delivery is steered separately.
+const SPEECH_STYLE = "speaking slowly, warm and thoughtful";
 
 export async function POST(req: NextRequest) {
   try {
-    if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json(
-        { error: "Server is not configured with an OpenAI API key." },
-        { status: 500 }
-      );
-    }
-
     const body = await req.json();
     const text: string | undefined = body.text;
 
@@ -30,22 +31,48 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const response = await openai.audio.speech.create({
-      model: "tts-1",
-      voice: "onyx",
-      speed: 0.85,
-      input: text,
+    if (text.length > MAX_SPEECH_CHARS) {
+      return NextResponse.json(
+        { error: "Text is too long to speak." },
+        { status: 400 }
+      );
+    }
+
+    // store: false keeps the request out of Google's saved interaction history.
+    const interaction = await getGemini().interactions.create({
+      model: GEMINI_TTS_MODEL,
+      input: [
+        {
+          type: "user_input",
+          content: [
+            {
+              type: "text",
+              text: text.trim(),
+              annotations: [{ type: "speech_metadata", style: SPEECH_STYLE }],
+            },
+          ],
+        },
+      ],
+      response_format: { type: "audio" },
+      generation_config: { speech_config: [{ voice: GEMINI_TTS_VOICE }] },
+      store: false,
     });
 
-        const audioArrayBuffer = await response.arrayBuffer();
+    const audio = interaction.output_audio;
+    if (!audio?.data) {
+      throw new Error("Gemini TTS returned no audio.");
+    }
 
-    return new NextResponse(audioArrayBuffer, {
+    // Unary responses come back as a complete WAV file (24 kHz, 16-bit mono),
+    // which browsers play directly.
+    const audioBytes = Buffer.from(audio.data, "base64");
+
+    return new NextResponse(audioBytes, {
       headers: {
-        "Content-Type": "audio/mpeg",
-        "Content-Length": audioArrayBuffer.byteLength.toString(),
+        "Content-Type": audio.mime_type || "audio/wav",
+        "Content-Length": audioBytes.byteLength.toString(),
       },
     });
-    
   } catch (error) {
     console.error("TTS error:", error);
     return NextResponse.json(

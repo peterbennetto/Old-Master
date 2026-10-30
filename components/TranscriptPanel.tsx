@@ -1,13 +1,13 @@
 // components/TranscriptPanel.tsx
 //
-// Secondary display area for the user's own input — the Whisper transcript
+// Secondary display area for the user's own input — the speech transcript
 // (voice path) or the submitted text (text path). Deliberately smaller and
 // plainer than ResponsePanel, so it doesn't compete with the "wisdom" area.
 
 type TranscriptPanelProps = {
   /** The user's question, once known. Empty/undefined before anything is submitted. */
   transcript?: string;
-  /** True while waiting on Whisper (voice path only). */
+  /** True while waiting on speech-to-text (voice path only). */
   isTranscribing: boolean;
 };
 

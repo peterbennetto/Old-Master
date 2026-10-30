@@ -2,7 +2,8 @@
 //
 // Main page. Owns conversation state and the bot's current stage.
 // Both the voice path (MicButton) and text path (TextField) converge
-// here into the same /api/chat -> /api/speak flow.
+// here into the same /api/chat -> /api/speak flow (voice also starts with
+// /api/transcribe).
 
 "use client";
 
@@ -20,6 +21,8 @@ export default function Home() {
   const [conversation, setConversation] = useState<ConversationTurn[]>([]);
   const [currentTranscript, setCurrentTranscript] = useState<string>("");
   const [currentResponse, setCurrentResponse] = useState<string>("");
+  // Plain-language note for mic problems (permission denied, no speech heard).
+  const [notice, setNotice] = useState<string>("");
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -42,6 +45,7 @@ export default function Home() {
     const updatedConversation = [...conversation, userTurn];
     setConversation(updatedConversation);
     setCurrentResponse("");
+    setNotice("");
     setBotState("thinking");
 
     try {
@@ -60,15 +64,29 @@ export default function Home() {
       let fullText = "";
       let streamCompleted = false;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          streamCompleted = true;
-          break;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            streamCompleted = true;
+            break;
+          }
+          const chunk = decoder.decode(value, { stream: true });
+          fullText += chunk;
+          setCurrentResponse(fullText);
         }
-        const chunk = decoder.decode(value, { stream: true });
-        fullText += chunk;
-        setCurrentResponse(fullText);
+      } catch (streamError) {
+        // The server errors the stream when the Brain fails mid-reply.
+        // Whatever arrived stays on screen; streamCompleted stays false.
+        console.error("Chat stream interrupted:", streamError);
+      }
+
+      // An empty reply is never stored (the next request would carry a blank
+      // assistant turn) — show the fallback line instead.
+      if (!fullText.trim()) {
+        setCurrentResponse(FALLBACK_LINE);
+        resetToIdle();
+        return;
       }
 
       const assistantTurn: ConversationTurn = {
@@ -78,9 +96,9 @@ export default function Home() {
       };
       setConversation((prev) => [...prev, assistantTurn]);
 
-      // Streaming interruption: if we didn't reach `done` cleanly, or got
-      // no text at all, skip TTS entirely per spec and release the lock.
-      if (!streamCompleted || !fullText.trim()) {
+      // Streaming interruption: if we didn't reach `done` cleanly, skip TTS
+      // entirely per spec and release the lock.
+      if (!streamCompleted) {
         resetToIdle();
         return;
       }
@@ -139,6 +157,7 @@ export default function Home() {
   function handleRecordingStart() {
     setBotState("listening");
     setCurrentTranscript("");
+    setNotice("");
   }
 
   function handleTranscribing() {
@@ -152,6 +171,7 @@ export default function Home() {
 
   function handleMicError(message: string) {
     console.error(message);
+    setNotice(message);
     resetToIdle();
   }
 
@@ -173,6 +193,12 @@ export default function Home() {
       </div>
 
       <StatusBadge state={botState} />
+
+      {notice && (
+        <p role="alert" className="text-center text-sm text-master-gold">
+          {notice}
+        </p>
+      )}
 
       <TranscriptPanel
         transcript={currentTranscript}

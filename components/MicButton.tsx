@@ -17,7 +17,7 @@ type MicButtonProps = {
   onRecordingStart: () => void;
   /** Fired once recording stops and transcription begins (state → "transcribing"). */
   onTranscribing: () => void;
-  /** Fired with the transcript once Whisper returns it. */
+  /** Fired with the transcript once speech-to-text returns it. */
   onTranscript: (transcript: string) => void;
   /** Fired if mic access, recording, or transcription fails. Caller
    *  decides how to surface this (e.g. re-enable inputs, show fallback). */
@@ -38,8 +38,12 @@ export default function MicButton({
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
 
+  // The parent locks inputs as soon as recording starts (state "listening"),
+  // but this button must stay clickable then so the user can stop manually.
+  const locked = disabled && !isRecording;
+
   async function handleClick() {
-    if (disabled) return;
+    if (locked) return;
     if (isRecording) {
       stopRecording();
       return;
@@ -102,7 +106,10 @@ export default function MicButton({
   }
 
   async function handleRecordingComplete() {
-    const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+    // Chrome records webm, Firefox ogg, Safari mp4 — keep whatever the
+    // browser actually produced so the server labels it correctly.
+    const mimeType = mediaRecorderRef.current?.mimeType || "audio/webm";
+    const blob = new Blob(chunksRef.current, { type: mimeType });
     chunksRef.current = [];
 
     if (blob.size === 0) {
@@ -115,7 +122,7 @@ export default function MicButton({
 
     try {
       const formData = new FormData();
-      formData.append("audio", blob, "recording.webm");
+      formData.append("audio", blob, "recording");
 
       const response = await fetch("/api/transcribe", {
         method: "POST",
@@ -127,6 +134,10 @@ export default function MicButton({
       }
 
       const data = await response.json();
+      if (typeof data.transcript !== "string" || !data.transcript.trim()) {
+        onError("No speech detected. Try again.");
+        return;
+      }
       onTranscript(data.transcript);
     } catch (error) {
       console.error("Transcription error:", error);
@@ -138,7 +149,7 @@ export default function MicButton({
     <button
       type="button"
       onClick={handleClick}
-      disabled={disabled}
+      disabled={locked}
       aria-pressed={isRecording}
       aria-label={isRecording ? "Stop recording" : "Start recording"}
       className={`
@@ -150,7 +161,7 @@ export default function MicButton({
             : "border-master-green bg-master-panel"
         }
         ${
-          disabled
+          locked
             ? "cursor-not-allowed opacity-40"
             : "cursor-pointer hover:border-master-gold"
         }

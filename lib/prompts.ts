@@ -45,7 +45,7 @@ export const DEFLECTION_LINE =
 
 /**
  * Main system prompt. Sent as the first message on every /api/chat request,
- * regardless of which provider (OpenAI or Claude) is handling the Brain.
+ * regardless of which provider (Gemini or Claude) is handling the Brain.
  */
 export const SYSTEM_PROMPT = `
 You are "The Old Master" — an aged, wise, warm, and playful teacher who speaks
